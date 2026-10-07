@@ -1,6 +1,5 @@
 /* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
    Adapté pour Vercel + MongoDB (Mongoose) */
-import http from "node:http";
 import crypto from "node:crypto";
 import https from "node:https";
 import dns from "node:dns";
@@ -2229,11 +2228,44 @@ function bodyDeadline(req) {
   req.allowSlowBody = clear;
 }
 
-const server = http.createServer(async (req, res) => {
-  // Recharge la BDD en mémoire à chaque requête pour éviter la désynchronisation des instances Vercel
-  await loadDb();
+let isConnected = false;
 
+export default async function handler(req, res) {
+  // 1. Connexion à MongoDB maintenue entre les requêtes
+  if (!isConnected) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI, {
+        bufferCommands: false,
+      });
+      isConnected = true;
+      console.log("Connecté à MongoDB Atlas");
+
+      const vapidDoc = await DbModel.findOne({ id: "vapid" }).lean();
+      if (vapidDoc && vapidDoc.data) {
+        vapid = vapidDoc.data;
+      } else {
+        vapid = webpush.generateVAPIDKeys();
+        await DbModel.updateOne(
+          { id: "vapid" },
+          { data: vapid },
+          { upsert: true },
+        );
+      }
+      webpush.setVapidDetails(VAPID_SUBJECT, vapid.publicKey, vapid.privateKey);
+
+      if (AUDIT_ON) {
+        await compactAudit();
+      }
+    } catch (e) {
+      console.error("Erreur MongoDB:", e);
+      return json(res, 500, { error: "Database connection failed" });
+    }
+  }
+
+  // 2. Traitement de la requête HTTP
+  await loadDb();
   bodyDeadline(req);
+
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -2247,6 +2279,7 @@ const server = http.createServer(async (req, res) => {
     });
     return res.end();
   }
+
   let url;
   try {
     url = new URL(req.url, "http://x");
@@ -2254,11 +2287,13 @@ const server = http.createServer(async (req, res) => {
     return json(res, 400, { error: "bad request" });
   }
   let key = req.method + " " + url.pathname;
-  const handler = routes[key];
-  if (!handler) return json(res, 404, { error: "not found" });
+  const routeHandler = routes[key];
+
+  if (!routeHandler) return json(res, 404, { error: "not found" });
   if (!csrfOk(req, key)) {
     return json(res, 403, { error: "cross-origin request refused" });
   }
+
   if (key in THROTTLED) {
     const addr = limitAddress(req);
     const kind = THROTTLED[key];
@@ -2267,8 +2302,9 @@ const server = http.createServer(async (req, res) => {
       (kind ? ADDR_FAILS.retryAfter(kind + "|" + addr) : 0);
     if (wait) return tooMany(res, wait);
   }
+
   try {
-    await handler(req, res);
+    await routeHandler(req, res);
   } catch (e) {
     if (e?.clientGone) return;
     if (e instanceof HttpError) {
@@ -2288,44 +2324,4 @@ const server = http.createServer(async (req, res) => {
     console.error(key, e);
     if (!res.headersSent) json(res, 500, { error: "server error" });
   }
-});
-server.requestTimeout = 30 * 60000;
-server.headersTimeout = 60000;
-
-// Fonction de lancement asynchrone Vercel compatible
-async function startServer() {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI, { bufferCommands: false });
-    console.log("Connecté à MongoDB Atlas");
-
-    // Initialisation ou récupération VAPID depuis MongoDB
-    const vapidDoc = await DbModel.findOne({ id: "vapid" }).lean();
-    if (vapidDoc && vapidDoc.data) {
-      vapid = vapidDoc.data;
-    } else {
-      vapid = webpush.generateVAPIDKeys();
-      await DbModel.updateOne(
-        { id: "vapid" },
-        { data: vapid },
-        { upsert: true },
-      );
-    }
-    webpush.setVapidDetails(VAPID_SUBJECT, vapid.publicKey, vapid.privateKey);
-
-    if (AUDIT_ON) {
-      await compactAudit();
-      setInterval(compactAudit, 3600000).unref();
-    }
-
-    await loadDb();
-    server.listen(PORT, () =>
-      console.log(
-        `gym-api on :${server.address().port} (rpID=${RP_ID}, origin=${ORIGIN})`,
-      ),
-    );
-  } catch (e) {
-    console.error("Echec du démarrage du serveur:", e);
-  }
 }
-
-startServer();

@@ -1,6 +1,6 @@
 {
   "name": "opengym",
   "scripts": {
-    "build": "cd frontend && npm install && npm run build"
+    "vercel-build": "cd frontend && npm install && npm run build && cd .. && mkdir -p public && cp -r frontend/dist/* public/"
   }
 }
