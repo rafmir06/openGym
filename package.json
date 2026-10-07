@@ -1,6 +1,13 @@
 {
   "name": "opengym",
+  "type": "module",
+  "main": "api/server.js",
   "scripts": {
     "vercel-build": "cd frontend && npm install && npm run build && cd .. && mkdir -p public && cp -r frontend/dist/* public/"
+  },
+  "dependencies": {
+    "mongoose": "^8.0.0",
+    "@simplewebauthn/server": "^9.0.0",
+    "web-push": "^3.6.0"
   }
 }
