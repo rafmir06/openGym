@@ -1,5 +1,5 @@
 /* opengym-api — passkey (WebAuthn) auth + per-user state storage for openGym
-   Adapté pour Vercel + MongoDB (Mongoose) */
+   Adapté pour Vercel + MongoDB (Mongoose) - Modules IA Coach retirés */
 import crypto from "node:crypto";
 import https from "node:https";
 import dns from "node:dns";
@@ -12,11 +12,6 @@ import {
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 import webpush from "web-push";
-import * as coachConfig from "./coach/config.js";
-import * as coachJobs from "./coach/jobs.js";
-import { coachRoutes } from "./coach/routes.js";
-import { startCadence } from "./coach/cadence.js";
-import { startWarmup } from "./coach/warmup.js";
 import { dayReminderPush, restTimerPush, testPush } from "./push-messages.js";
 import { verifyError } from "./verify-error.js";
 import {
@@ -72,19 +67,18 @@ const DEFAULT_LANG = (() => {
   if (/^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/.test(v)) return v;
   return "";
 })();
-const TRUST_PROXY = true; // Forcé sur Vercel
+const TRUST_PROXY = true;
 const SESSION_DAYS = Math.max(1, +(process.env.SESSION_DAYS || 90) || 90);
 const MAX_BODY = 5 * 1024 * 1024;
 const SECURE = /^https:/i.test(ORIGIN) ? " Secure;" : "";
 
-// SECRET doit être défini sur Vercel pour éviter que les sessions expirent aux redémarrages
 if (!process.env.SECRET)
   console.warn(
     "⚠️ ATTENTION: Veuillez définir une variable d'environnement 'SECRET' dans Vercel.",
   );
 const SECRET = process.env.SECRET || crypto.randomBytes(32).toString("hex");
 
-/* ---------- MongoDB Setup (remplace le système de fichiers) ---------- */
+/* ---------- MongoDB Setup ---------- */
 const DbSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   data: { type: Object, default: {} },
@@ -169,7 +163,7 @@ const MAX_SUBS_PER_USER = 20;
 
 function isPrivateAddr(ip) {
   return false;
-} // Simplifié pour Vercel
+}
 function ipv6Groups(v) {
   return null;
 }
@@ -1533,7 +1527,6 @@ const routes = {
       allow_guest: ALLOW_GUEST,
       ...(PASSWORD_LOGIN ? { password_login: true } : {}),
       ...(DEFAULT_LANG ? { default_lang: DEFAULT_LANG } : {}),
-      ...(readSession(req) ? { coach: coachConfig.publicConfig() } : {}),
     });
   },
 
@@ -2106,9 +2099,6 @@ const routes = {
     try {
       await StateModel.deleteOne({ uid: u.id });
     } catch {}
-    try {
-      coachConfig.clearProfileAuth(u.id);
-    } catch {}
     await saveDb();
     await audit(req, "admin.user.delete", { user: admin, msg: name });
     json(res, 200, { ok: true, id: u.id });
@@ -2191,26 +2181,7 @@ const routes = {
     await audit(req, "admin.audit.clear", { user: admin });
     json(res, 200, { ok: true });
   },
-
-  ...coachRoutes({ json, readBody, readSession, requireAdmin }),
 };
-
-coachJobs.recoverOnBoot();
-coachJobs.setProposalHook((uid, pending) => {
-  const n = (pending?.changes || []).length;
-  if (!n) return;
-  sendPush(uid, {
-    title: "Your Coach has been reading",
-    body:
-      n === 1
-        ? "1 suggestion after this week"
-        : `${n} suggestions after this week`,
-    tag: "coach-proposal",
-    url: "#/coach",
-  });
-});
-startCadence({ users: () => db.users, userNow });
-startWarmup();
 
 const BODY_TIMEOUT_MS = Math.max(
   50,
@@ -2231,7 +2202,6 @@ function bodyDeadline(req) {
 let isConnected = false;
 
 export default async function handler(req, res) {
-  // 1. Connexion à MongoDB maintenue entre les requêtes
   if (!isConnected) {
     try {
       await mongoose.connect(process.env.MONGODB_URI, {
@@ -2262,7 +2232,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // 2. Traitement de la requête HTTP
   await loadDb();
   bodyDeadline(req);
 
