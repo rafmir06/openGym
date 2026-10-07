@@ -1,4 +1,5 @@
 {
+  "main": "api/server.js",
   "devDependencies": {
     "js-yaml": "^4.1.0"
   }
