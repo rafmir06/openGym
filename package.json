@@ -1,6 +1,6 @@
 {
-  "main": "api/server.js",
-  "devDependencies": {
-    "js-yaml": "^4.1.0"
+  "name": "opengym",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
   }
 }
